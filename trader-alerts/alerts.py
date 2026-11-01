@@ -57,6 +57,21 @@ import time
 import urllib.error
 import urllib.request
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
 PAUSE = 0.5    # seconds between requests: be polite to free endpoints
 BACKOFF = 2.0  # seconds to wait before the one retry after a 429
@@ -94,6 +109,8 @@ CALENDAR_YEARS = (2026, 2027)
 OPEN = datetime.time(9, 30)
 CLOSE = datetime.time(16, 0)
 EARLY = datetime.time(13, 0)
+if CRYPTO:  # 24/7: day = 00:00 to 23:55 UTC (the last 5-minute bar is the rollover)
+    OPEN, CLOSE, EARLY = datetime.time(0, 0), datetime.time(23, 55), datetime.time(23, 55)
 
 
 class AlertError(Exception):
@@ -112,6 +129,8 @@ def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise.
     DST runs from 2:00 a.m. on the second Sunday of March to 2:00 a.m. on the
     first Sunday of November (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
     end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
@@ -147,6 +166,8 @@ def parse_now(text):
 
 def trading_day(d):
     """(is_trading_day, reason). Weekends and the NYSE holiday list."""
+    if CRYPTO:
+        return True, ""
     if d.weekday() >= 5:
         return False, "weekend"
     name = NYSE_HOLIDAYS.get(d.isoformat())
@@ -185,7 +206,7 @@ def market_status(now_utc):
     nd = d if (s and local.time() < s[0]) else d + datetime.timedelta(days=1)
     for _ in range(15):
         if session(nd):
-            st["next_open"] = "%s 09:30" % nd.isoformat()
+            st["next_open"] = "%s %s" % (nd.isoformat(), OPEN.strftime("%H:%M"))
             break
         nd += datetime.timedelta(days=1)
     return st
@@ -510,7 +531,7 @@ def rules_from_plan(plan, cfg_flat_by=None):
         label = plan.get("%s_label" % key)
         out.append({"id": "%s-plan-%s" % (sym.lower(), key), "symbol": sym, "type": typ, "price": float(v),
                     "note": word + (": " + label if label else "")})
-    flat = plan.get("flat_by") or cfg_flat_by or "15:55"
+    flat = plan.get("flat_by") or cfg_flat_by or ("23:50" if CRYPTO else "15:55")
     if _hhmm(flat) is None:
         raise AlertError("the plan's flat_by %r is not a time like 15:55" % flat)
     out.append({"id": "%s-flat-by" % sym.lower(), "symbol": sym, "type": "time", "at": flat,

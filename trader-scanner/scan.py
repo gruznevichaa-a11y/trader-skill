@@ -79,6 +79,21 @@ import time
 import urllib.error
 import urllib.request
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
 YAHOO_HOSTS = ("https://query2.finance.yahoo.com", "https://query1.finance.yahoo.com")
 NASDAQ_FILES = ("nasdaqlisted.txt", "otherlisted.txt")
@@ -124,6 +139,46 @@ CALENDAR_YEARS = (2026, 2027)
 OPEN = datetime.time(9, 30)
 CLOSE = datetime.time(16, 0)
 EARLY = datetime.time(13, 0)
+if CRYPTO:  # 24/7: day = 00:00 to 23:55 UTC (the last 5-minute bar is the rollover)
+    OPEN, CLOSE, EARLY = datetime.time(0, 0), datetime.time(23, 55), datetime.time(23, 55)
+
+# Liquid coins on Yahoo Finance (pair vs USD). Edit trader/universe.txt to add more.
+CRYPTO_UNIVERSE = (
+    ("BTC-USD", "Bitcoin"),
+    ("ETH-USD", "Ethereum"),
+    ("XRP-USD", "XRP"),
+    ("BNB-USD", "BNB"),
+    ("SOL-USD", "Solana"),
+    ("DOGE-USD", "Dogecoin"),
+    ("ADA-USD", "Cardano"),
+    ("TRX-USD", "TRON"),
+    ("LINK-USD", "Chainlink"),
+    ("AVAX-USD", "Avalanche"),
+    ("XLM-USD", "Stellar"),
+    ("BCH-USD", "Bitcoin Cash"),
+    ("HBAR-USD", "Hedera"),
+    ("LTC-USD", "Litecoin"),
+    ("DOT-USD", "Polkadot"),
+    ("SUI-USD", "Sui"),
+    ("UNI-USD", "Uniswap"),
+    ("AAVE-USD", "Aave"),
+    ("NEAR-USD", "NEAR Protocol"),
+    ("APT-USD", "Aptos"),
+    ("ICP-USD", "Internet Computer"),
+    ("ETC-USD", "Ethereum Classic"),
+    ("ATOM-USD", "Cosmos"),
+    ("FIL-USD", "Filecoin"),
+    ("ARB-USD", "Arbitrum"),
+    ("OP-USD", "Optimism"),
+    ("INJ-USD", "Injective"),
+    ("ALGO-USD", "Algorand"),
+    ("VET-USD", "VeChain"),
+    ("RENDER-USD", "Render"),
+    ("TAO-USD", "Bittensor"),
+    ("TON-USD", "Toncoin"),
+    ("SHIB-USD", "Shiba Inu"),
+    ("PEPE-USD", "Pepe"),
+)
 
 SETUPS = [
     ("breakout_20d", "20-day closing-high breakout"),
@@ -151,6 +206,8 @@ def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise.
     DST runs from 2:00 a.m. on the second Sunday of March to 2:00 a.m. on the
     first Sunday of November (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
     end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
@@ -198,6 +255,8 @@ def parse_hhmm(text, flag="--at"):
 
 def trading_day(d):
     """(is_trading_day, reason). Weekends and the NYSE holiday list."""
+    if CRYPTO:
+        return True, ""
     if d.weekday() >= 5:
         return False, "weekend"
     name = NYSE_HOLIDAYS.get(d.isoformat())
@@ -566,7 +625,7 @@ def scan_daily(data, symbols, now_utc, min_price, min_volume):
         closes = [c for _, c in bars]
         tags, nums = find_setups(closes)
         if tags:
-            hits.append({"symbol": sym, "setups": tags, "price": round(closes[-1], 2),
+            hits.append({"symbol": sym, "setups": tags, "price": px(closes[-1]),
                          "close_date": d_last.isoformat(), "rsi": round(nums["rsi"], 1),
                          "volume": int(vol) if vol is not None else None})
     hits.sort(key=lambda h: (-(h["price"] * (h["volume"] or 0)), h["symbol"]))  # most dollars traded first
@@ -637,9 +696,9 @@ def orb_hit(bars, n_range):
         b = bars[k]
         if b["c"] > oh:
             closes_at = b["start"] + datetime.timedelta(minutes=BAR_MIN)
-            return {"price": round(b["c"], 2), "at": clock_label(closes_at),
+            return {"price": px(b["c"]), "at": clock_label(closes_at),
                     "bar_start": b["start"].strftime("%H:%M"), "bar_index": k,
-                    "or_high": round(oh, 2), "or_low": round(ol, 2),
+                    "or_high": px(oh), "or_low": px(ol),
                     "pct_over": round((b["c"] / oh - 1) * 100, 2), "_t": closes_at}
     return None
 
@@ -831,14 +890,31 @@ def write_json(path, doc):
         fh.write("\n")
 
 
+def px(x):
+    """2 decimals normally, 6 under $1 (crypto)."""
+    return round(x, 2 if abs(x) >= 1 else 6)
+
+
 def money(x):
-    return "${:,.2f}".format(x)
+    return "${:,.2f}".format(x) if abs(x) >= 1 else "${:,.6f}".format(x)
 
 
 # ---------------------------------------------------------------- commands
 
 def cmd_universe(a):
     t0 = time.time()
+    if CRYPTO:
+        if not a.no_write:
+            d = os.path.dirname(a.out)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(a.out, "w", encoding="utf-8") as fh:
+                for sym, name in CRYPTO_UNIVERSE:
+                    fh.write("%s|%s\n" % (sym, name))
+        print("Crypto mode: %d coins vs USD (built-in list, no download)." % len(CRYPTO_UNIVERSE))
+        if not a.no_write:
+            print("Wrote %s (one SYMBOL|Name a line). Add more Yahoo pairs like XYZ-USD by hand." % a.out)
+        return 0
     texts = {}
     for k, fname in enumerate(NASDAQ_FILES):
         if a.offline:
@@ -944,7 +1020,7 @@ def cmd_orb(a):
     now = parse_now(a.now)
     at = parse_hhmm(a.at) if a.at else None
     cfg = read_config(a.config)
-    until = parse_hhmm(a.until or cfg.get("no_entries_after") or "15:30", "--until")
+    until = parse_hhmm(a.until or cfg.get("no_entries_after") or ("23:30" if CRYPTO else "15:30"), "--until")
     data = failed = None
     explicit_day = None
     offline_syms = None
@@ -1024,7 +1100,7 @@ def cmd_orb(a):
 
 
 def _p(x):
-    return "{:,.2f}".format(x)
+    return "{:,.2f}".format(x) if abs(x) >= 1 else "{:,.6f}".format(x)
 
 
 def main(argv=None):
@@ -1056,9 +1132,9 @@ def main(argv=None):
         p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("daily", help="pre-market setups from daily closes")
-    common(p, 5.0, 1000000)
+    common(p, 0.0 if CRYPTO else 5.0, 1000000)
     p = sub.add_parser("orb", help="opening-range breakouts so far today")
-    common(p, 5.0, 0)
+    common(p, 0.0 if CRYPTO else 5.0, 0)
     p.add_argument("--or-minutes", type=int, default=15)
     p.add_argument("--max-confirm", type=int, default=MAX_CONFIRM,
                    help="v8 charts to fetch in stage 2, most traded first (%d; 0 = all)" % MAX_CONFIRM)

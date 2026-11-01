@@ -52,6 +52,21 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 YAHOO = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%s&region=US&lang=en-US"
 CHART = "https://%s.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=5m"
 SEC_FEED = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=%s&type=%s"
@@ -102,6 +117,8 @@ def _nth_sunday(year, month, n):
 
 def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = _dt.datetime.combine(_nth_sunday(y, 3, 2), _dt.time(7, 0))   # 2:00 EST
     end = _dt.datetime.combine(_nth_sunday(y, 11, 1), _dt.time(6, 0))    # 2:00 EDT

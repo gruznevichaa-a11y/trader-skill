@@ -50,11 +50,26 @@ import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
 BACKOFF = 5.0
 HOSTS = ("query2", "query1")
 INTERVALS = {"1m": 60, "5m": 300}
-DEFAULTS = {"flat_by": "15:55", "min_reward_risk": 1.0}
+DEFAULTS = {"flat_by": ("23:50" if CRYPTO else "15:55"), "min_reward_risk": 1.0}
 ATR_BARS = 14
 MIN_RISK_PCT = Decimal("0.05")     # risk under 0.05% of the price is inside the spread's noise
 CENT = Decimal("0.01")
@@ -91,6 +106,8 @@ NYSE_EARLY_CLOSE = {  # 1:00 p.m. ET
 OPEN = datetime.time(9, 30)
 CLOSE = datetime.time(16, 0)
 EARLY = datetime.time(13, 0)
+if CRYPTO:  # 24/7: day = 00:00 to 23:55 UTC (the last 5-minute bar is the rollover)
+    OPEN, CLOSE, EARLY = datetime.time(0, 0), datetime.time(23, 55), datetime.time(23, 55)
 
 
 class PlanError(Exception):
@@ -107,6 +124,8 @@ def _nth_sunday(year, month, n):
 
 def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
     end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
@@ -186,7 +205,7 @@ def ampm(t):
 
 def session(d):
     """(open_time, close_time) in New York time, or None if closed all day."""
-    if d.weekday() >= 5 or d.isoformat() in NYSE_HOLIDAYS:
+    if not CRYPTO and (d.weekday() >= 5 or d.isoformat() in NYSE_HOLIDAYS):
         return None
     return OPEN, (EARLY if d.isoformat() in NYSE_EARLY_CLOSE else CLOSE)
 

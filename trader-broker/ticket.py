@@ -41,6 +41,21 @@ import os
 import re
 import sys
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 ALPACA_FIELDS = ("symbol", "side", "qty", "notional", "type", "time_in_force", "limit_price",
                  "stop_price", "trail_price", "trail_percent", "extended_hours", "client_order_id",
                  "order_class", "take_profit_limit_price", "stop_loss_stop_price",
@@ -71,6 +86,8 @@ def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise.
     DST runs from 2:00 a.m. on the second Sunday of March to 2:00 a.m. on the
     first Sunday of November (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
     end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
@@ -602,7 +619,7 @@ def cmd_flatten(a):
                               "%s) and pass --qty if you do hold some" % (sym, a.portfolio, sym))
     plan = read_json(a.plan, "plan", required=False) or {}
     flat_by = (plan.get("flat_by") if str(plan.get("symbol", "")).upper() == sym else None) \
-        or cfg.get("flat_by") or "15:55"
+        or cfg.get("flat_by") or ("23:50" if CRYPTO else "15:55")
     order = {"symbol": sym, "side": "sell", "qty": _str_num(qty), "type": "market", "time_in_force": "day",
              "why": "flat by %s New York: closes the %s day trade before the close (qty from %s)"
              % (flat_by, sym, source)}

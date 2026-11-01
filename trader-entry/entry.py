@@ -61,6 +61,21 @@ import time
 import urllib.error
 import urllib.request
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
 PAUSE = 0.5      # seconds between requests to the free endpoint
 BACKOFF = 5.0    # seconds before the one retry after an HTTP 429
@@ -68,7 +83,7 @@ GRACE = 2        # seconds after a bar closes before watch asks for it
 SETTLE = 60      # seconds a closed bar may wait for Yahoo's data to catch up
 HOSTS = ("query2", "query1")
 INTERVALS = {"1m": 60, "5m": 300}
-DEFAULTS = {"no_entries_before": "09:45", "no_entries_after": "15:30"}
+DEFAULTS = {"no_entries_before": ("00:15" if CRYPTO else "09:45"), "no_entries_after": ("23:30" if CRYPTO else "15:30")}
 EPOCH = datetime.datetime(1970, 1, 1)
 
 NYSE_HOLIDAYS = {
@@ -102,6 +117,8 @@ CALENDAR_YEARS = (2026, 2027)
 OPEN = datetime.time(9, 30)
 CLOSE = datetime.time(16, 0)
 EARLY = datetime.time(13, 0)
+if CRYPTO:  # 24/7: day = 00:00 to 23:55 UTC (the last 5-minute bar is the rollover)
+    OPEN, CLOSE, EARLY = datetime.time(0, 0), datetime.time(23, 55), datetime.time(23, 55)
 
 
 class EntryError(Exception):
@@ -120,6 +137,8 @@ def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise.
     DST runs from 2:00 a.m. on the second Sunday of March to 2:00 a.m. on the
     first Sunday of November (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
     end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
@@ -200,6 +219,8 @@ def ampm(t):
 
 def trading_day(d):
     """(is_trading_day, reason). Weekends and the NYSE holiday list."""
+    if CRYPTO:
+        return True, ""
     if d.weekday() >= 5:
         return False, "weekend"
     name = NYSE_HOLIDAYS.get(d.isoformat())
@@ -220,7 +241,7 @@ def next_open(d):
     nd = d + datetime.timedelta(days=1)
     for _ in range(15):
         if session(nd):
-            return "%s 09:30" % nd.isoformat()
+            return "%s %s" % (nd.isoformat(), OPEN.strftime("%H:%M"))
         nd += datetime.timedelta(days=1)
     return None
 
@@ -772,7 +793,7 @@ def watch_loop(provider, clock, sleep, emit, opts, every=30, until=None, max_err
         else:
             nxt = open_dt + datetime.timedelta(seconds=(cur_slot + 1) * step + GRACE)
             wait = (nxt - local).total_seconds()
-        cutoff = datetime.datetime.combine(day, parse_hhmm(res.get("no_entries_after") or "15:30", "cutoff"))
+        cutoff = datetime.datetime.combine(day, parse_hhmm(res.get("no_entries_after") or ("23:30" if CRYPTO else "15:30"), "cutoff"))
         for stop_at in (until, cutoff, close_dt):
             if stop_at and stop_at > local:
                 wait = min(wait, (stop_at - local).total_seconds())

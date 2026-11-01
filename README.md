@@ -57,6 +57,19 @@ The tools need Python 3.8 or newer. Nothing to pip install. The SEC tools
 email in `trader/config.json` (`"sec_user_agent": "Your Name you@example.com"`)
 or in the `SEC_USER_AGENT` environment variable.
 
+## Crypto mode
+
+Set `TRADER_MARKET=crypto` (or `"market": "crypto"` in `trader/config.json`).
+Then the market is open 24/7 and all times are UTC: the "opening range" is the
+first 15 minutes after 00:00 UTC, the day runs 00:00 to 23:55 UTC, entries are
+allowed 00:15 to 23:30 and `flat_by` is 23:50 (change them in `trader/config.json`).
+`scan.py universe` writes a built-in list of 34 liquid coins (Yahoo pairs like
+`BTC-USD`) with no download. Stock-only skills (`trader-pelosi`, `trader-analyst`)
+make no sense for coins. Status: session logic and the scanner are adapted; order
+sizing is still whole units and cents, so sub-dollar coins and fractional
+quantities are not supported yet in `trader-budget`, `trader-risk` and
+`trader-broker`. Not tested against live data.
+
 ## The eleven
 
 | command | job | what it does |

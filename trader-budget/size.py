@@ -58,6 +58,21 @@ import math
 import os
 import sys
 
+
+def _market():
+    """Crypto mode: trade 24/7 in UTC. Set TRADER_MARKET=crypto or "market": "crypto" in trader/config.json."""
+    m = (os.environ.get("TRADER_MARKET") or "").strip().lower()
+    if not m:
+        try:
+            with open(os.environ.get("TRADER_CONFIG", "trader/config.json"), encoding="utf-8") as fh:
+                m = str(json.load(fh).get("market") or "").strip().lower()
+        except (OSError, ValueError, AttributeError):
+            m = ""
+    return m
+
+
+CRYPTO = _market() == "crypto"
+
 # v2 defaults: the contract's config.example.json. Missing keys fall back to these.
 DEFAULTS = {
     "budget": None,
@@ -71,9 +86,9 @@ DEFAULTS = {
     "max_orders_per_day": 10,
     "min_reward_risk": 1.0,
     "require_stop": True,
-    "no_entries_before": "09:45",
-    "no_entries_after": "15:30",
-    "flat_by": "15:55",
+    "no_entries_before": ("00:15" if CRYPTO else "09:45"),
+    "no_entries_after": ("23:30" if CRYPTO else "15:30"),
+    "flat_by": ("23:50" if CRYPTO else "15:55"),
     "fractional": False,
     "broker": "alpaca",
     "paper": True,
@@ -104,6 +119,8 @@ def eastern_offset(utc):
     """Hours from UTC for New York: -4 in daylight time, -5 otherwise.
     DST runs from 2:00 a.m. on the second Sunday of March to 2:00 a.m. on the
     first Sunday of November (US rule since 2007)."""
+    if CRYPTO:
+        return 0  # crypto: UTC
     y = utc.year
     start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
     end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
