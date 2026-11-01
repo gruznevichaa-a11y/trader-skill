@@ -1,22 +1,22 @@
 {
-  "name": "trader-skill",
-  "description": "11 Claude skills that copy the investors you trust, watch the news and Congress, size every trade to your budget, and never place an order without your yes.",
-  "version": "1.0.0",
+  "name": "day-trader-skill",
+  "description": "11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar.",
+  "version": "2.0.0",
   "author": {
     "name": "Jake Schincariol",
     "url": "https://opusjake.ai"
   },
-  "homepage": "https://github.com/Jakeschincariol/trader-skill",
-  "repository": "https://github.com/Jakeschincariol/trader-skill",
+  "homepage": "https://github.com/Jakeschincariol/day-trader-skill",
+  "repository": "https://github.com/Jakeschincariol/day-trader-skill",
   "license": "MIT",
   "keywords": [
     "claude-code",
     "claude-skills",
-    "investing",
-    "13f",
+    "day-trading",
     "stock-market",
-    "congress-trades",
-    "portfolio"
+    "backtesting",
+    "opening-range-breakout",
+    "paper-trading"
   ],
   "skills": "./"
 }
